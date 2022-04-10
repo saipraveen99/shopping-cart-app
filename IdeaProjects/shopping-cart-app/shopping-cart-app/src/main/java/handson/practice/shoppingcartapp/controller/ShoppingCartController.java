@@ -10,7 +10,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSource;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.ModelMap;
+import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.support.SessionStatus;
 import org.springframework.web.servlet.ModelAndView;
 
 import java.util.ArrayList;
@@ -18,6 +20,8 @@ import java.util.List;
 import java.util.Locale;
 
 @Controller
+// update case add relevant entries
+@SessionAttributes(value = "product")
 public class ShoppingCartController {
 
     private final ShoppingCartService service;
@@ -44,27 +48,58 @@ public class ShoppingCartController {
         return modelAndView;
     }
 
+    private Boolean validateInput(RequestDTO requestDTO, BindingResult result) {
+        boolean error = false;
+
+        if(requestDTO.getProductId().isEmpty()){
+            result.rejectValue("productId", "error.productId");
+            error = true;
+        }
+
+        if(requestDTO.getName().isEmpty()){
+            result.rejectValue("name", "error.name");
+            error = true;
+        }
+
+        if(!Float.isNaN(requestDTO.getPrice()) && requestDTO.getPrice() > 0) {
+            result.rejectValue("price", "error.price");
+            error = true;
+        }
+        if (requestDTO.getQuantity() == null || requestDTO.getQuantity() <= 0) {
+            result.rejectValue("quantity", "error.quantity");
+            String message = messageSource.getMessage("invalidQuantity", null, Locale.ENGLISH);
+            LOGGER.error(message);
+        }
+        return error;
+    }
+
     @PostMapping("/cart/add")
-    public ModelAndView addProduct(@ModelAttribute("product") RequestDTO product, ModelMap model) {
+    public ModelAndView addProduct(@ModelAttribute("product") RequestDTO product, BindingResult result,
+                                   SessionStatus sessionStatus) {
         ResponseDTO responseDTO = new ResponseDTO();
+        Boolean error = this.validateInput(product, result);
+        if (error) {
+            return new ModelAndView("redirect:/add", "product", new RequestDTO());
+        }
         if (null != product && product.getQuantity() >= 0) {
-            if (product.getQuantity() == 0) {
-                String message = messageSource.getMessage("invalidQuantity", null, Locale.ENGLISH);
-                LOGGER.error(message);
-                responseDTO.setMessage(message);
-            }
             if (null == cart) {
                 List<Product> products = new ArrayList<>();
                 Product productObj = service.getProduct(product);
                 products.add(productObj);
-                this.cart = new Cart(0, 0d, products);
-                productObj.setCart(this.cart);
-                this.cart = service.addProduct(this.cart, productObj);
+                try {
+                    this.cart = new Cart(0, 0d, products);
+                    productObj.setCart(this.cart);
+                    this.cart = service.addProduct(this.cart, productObj);
+                    sessionStatus.setComplete();
+                } catch (Exception e) {
+                    LOGGER.error(e.getLocalizedMessage());
+                }
             }
             else if (null != cart) {
                 try {
                     Product productObj = service.getProduct(product);
                     this.cart = service.addProduct(this.cart, productObj);
+                    sessionStatus.setComplete();
                     responseDTO.setMessage(messageSource.getMessage("productAdded", null, Locale.ENGLISH));
                 } catch (Exception e) {
                     LOGGER.error(e.getLocalizedMessage());
